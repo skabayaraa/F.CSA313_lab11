@@ -75,3 +75,103 @@ mvn test-compile org.pitest:pitest-maven:mutationCoverage 2>&1 | tee results/pit
   - *changed conditional boundary* → яг заагийн утга (90, 80, 3.8, 15 г.м.) дээр тест байхгүй.
   - *replaced return value / removed conditional / addition→subtraction* → assertion сул (`assertNotNull`, `assertTrue(муж)`), буруу утгыг ч хүлээн авдаг.
 - **Equivalent (0):** Мутант бүрийг шалгахад зан төлөв нь ижил үлдэх тохиолдол олдсонгүй — бүгдийг алах тест бичих боломжтой (Хэсэг B-д баталсан).
+
+---
+
+## Хэсэг B: Тестүүдээ хүчтэй болгох
+
+### B1 — Assertion-уудыг яг утгын болгох (оролт starter-тай ижил)
+- `assertNotNull(letterGrade(95))` → `assertEquals("A", letterGrade(95))` (B, C, D, F мөн адил)
+- `assertTrue(g >= 0 && g <= 4)` → `assertEquals(3.5, gpa({95,85}))`, `1.5`, `0.0`
+- `assertTrue(s >= 0 && s <= 100)` → `assertEquals(100 / 70 / 50 / 0 / 0, …)`
+
+### B2 — Зааг утгын тестүүд нэмэх
+- `letterGrade`: 100, 90/89.99, 80/79.99, 70/69.99, 60/59.99, 0 (+ −0.01, 100.01 → exception)
+- `gpa`: switch-ийн бүх үсгэн дүн тус бүр (A=4, B=3, C=2, D=1, F=0) + бүгдийг хамтад нь (= 2.0)
+- `scholarship`: 3.8/15 (3.79/15, 3.8/14), 3.4/12 (3.39/12, 3.4/11), 3.0 (2.99), хязгаар gpa 0 ба 4, credits 0;
+  зөрчилтэй/зөрчилгүй ижил оролт (100 ↔ 0); −0.01, 4.01, credits −1 → exception
+
+### Хэмжилтийн явц
+
+| Үе шат | Тест | PIT мөр (`results/pit-*.txt`) | Mutation Coverage | Test Strength | Commit |
+|---|---|---|---|---|---|
+| Эхлэл | 6 | `>> Generated 63 mutations Killed 17 (27%)` | 27% | 27% | `Step 1: baseline …` |
+| B1-ийн дараа | 6 | `>> Generated 63 mutations Killed 45 (71%)` | 71% | 71% | `B1: exact-value assertions …` |
+| B2-ийн дараа (эцсийн) | 36 | `>> Generated 63 mutations Killed 63 (100%)` | **100%** | **100%** | `B2: boundary tests …` |
+
+- B1 нь *replaced return value*, *removed conditional → false*, *addition→subtraction*, *switch default* төрлийн 28 мутантыг алсан
+  (сул assertion-ийн асуудал). Үлдсэн 18 нь бүгд *changed conditional boundary* ба `&&`/`||` доторх нэг нөхцөлийг
+  "true" болгосон мутант байсан — эдгээрийг зөвхөн заагийн утга барьдаг.
+- B2 нь үлдсэн 18-ыг бүгдийг алсан. Equivalent мутант байхгүй тул Mutation Coverage = Test Strength = 100%.
+- Эцсийн JaCoCo (`results/jacoco-final.csv`): Line 25/25, **Branch 41/41** (эхлэлд 38/41).
+
+![PIT эцсийн тайлан](images/pit-final.png)
+
+---
+
+## Хэсэг C: Гараар нэг мутант — PIT-гүйгээр
+
+### Гар мутаци: `gpa >= 3.8` → `gpa > 3.8` (мөр 52)
+
+```bash
+sed -i "52s/gpa >= 3.8/gpa > 3.8/" src/main/java/mn/edu/must/sqat/ScholarshipCalculator.java
+mvn test 2>&1 | tee results/mvn-test-manual-mutant.txt
+git restore src/main     # мутацитай кодыг commit хийгээгүй
+```
+
+Үр дүн (`results/mvn-test-manual-mutant.txt`): **Tests run: 36, Failures: 1 → BUILD FAILURE**
+```
+[ERROR] mn.edu.must.sqat.ScholarshipCalculatorTest.scholarship_boundaries(double, int, int)[1] -- Time elapsed: 0.061 s <<< FAILURE!
+org.opentest4j.AssertionFailedError: expected: <100> but was: <70>
+[ERROR]   ScholarshipCalculatorTest.scholarship_boundaries:139 expected: <100> but was: <70>
+```
+Унасан тест нь B2-ийн `scholarship_boundaries` — `[1]` = `scholarship(3.8, 15, false)`. Яг заагийн 3.8 голчтой оюутан
+мутант кодонд 100% биш 70% авсан тул барьсан. Starter-ийн сул багц энэ мутантыг барьж чадахгүй (3.9 ашигладаг, муж л шалгадаг).
+
+### Өөрийн equivalent мутант: `scores.length == 0` → `scores.length <= 0` (мөр 31)
+
+```bash
+sed -i "31s/scores.length == 0/scores.length <= 0/" src/main/java/mn/edu/must/sqat/ScholarshipCalculator.java
+mvn test 2>&1 | tee results/mvn-test-equivalent-mutant.txt   # Tests run: 36, Failures: 0 — BUILD SUCCESS
+git restore src/main
+```
+
+Java-д массивын урт хэзээ ч сөрөг байж чадахгүй тул `length <= 0` ба `length == 0` нь ямар ч оролтод яг ижил үр дүн өгнө —
+нэмэгдсэн `< 0` хэсэг бол хэзээ ч биелэхгүй идэвхгүй нөхцөл. Програмын ажиглагдах зан төлөв огт өөрчлөгдөхгүй учир ямар ч тест
+(хүчтэй ч бай) энэ мутантыг алж чадахгүй — энэ бол жинхэнэ equivalent мутант (бүх 36 тест PASS).
+
+---
+
+## Дүгнэлт
+
+Code coverage нь тест ажиллах үед кодын аль мөр, аль салаа *ажилласныг* хэмждэг бол mutation score нь кодонд жижиг алдаа
+оруулахад тестүүд үүнийг *барьж чадах эсэхийг* хэмждэг. Энэ лабад starter багц Line 100%-тай байсан ч mutation score нь ердөө 27%
+байсан — тест код ажиллуулж байгаа ч үр дүнг нь шалгадаггүй байв. Assertion-уудыг яг утгын болгоход (B1) score 71% болж,
+зааг утгын тестүүд нэмэхэд (B2) 100% хүрсэн; хамралт эхнээсээ 100% байсан тул энэ ахицыг JaCoCo огт харуулахгүй.
+Иймээс хамралт нь зайлшгүй боловч хангалтгүй нөхцөл, харин mutation score нь тестийн "алдаа илрүүлэх чадвар"-ыг шууд хэмждэг.
+AI-гаар бичүүлсэн тест ихэвчлэн кодыг бүрэн ажиллуулдаг (хамралт өндөр) боловч `assertNotNull`, мужийн шалгалт зэрэг сул
+assertion эсвэл одоогийн кодын гаралтыг хуулсан assertion бичих хандлагатай, заагийн утгыг алгасах нь элбэг.
+Тиймээс AI-ийн тестийг mutation score-оор шалгавал аль мутант амьд үлдсэнээс нь тестийн яг сул газрыг объектив харж,
+"энэ мутантыг алах тест бич" гэж зорилготойгоор сайжруулах боломжтой. Ингэснээр хамралтын тоонд хуурагдахгүй,
+бодит чанартай тестийн багц бүрдүүлнэ.
+
+---
+
+## Файлууд
+
+| Файл | Агуулга |
+|---|---|
+| `results/mvn-verify-start.txt`, `results/jacoco-start.csv` | Эхний `mvn clean verify` + JaCoCo (25/25, 38/41) |
+| `results/pit-start.txt` | PIT эхлэл — Killed 17 (27%) |
+| `results/pit-B1.txt` | PIT B1-ийн дараа — Killed 45 (71%) |
+| `results/pit-B2.txt` | PIT эцсийн — Killed 63 (100%) |
+| `results/mvn-verify-final.txt`, `results/jacoco-final.csv` | Эцсийн `mvn clean verify` + JaCoCo (25/25, 41/41) |
+| `results/mvn-test-manual-mutant.txt` | Хэсэг C гар мутаци (1 тест унасан) |
+| `results/mvn-test-equivalent-mutant.txt` | Хэсэг C equivalent мутант (36/36 PASS) |
+| `images/jacoco-start.png`, `images/pit-final.png` | Тайлангийн зургууд |
+
+Дахин шалгах:
+```bash
+mvn clean verify
+mvn test-compile org.pitest:pitest-maven:mutationCoverage
+```
